@@ -41,9 +41,9 @@ const server = http.createServer(app)
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json())
 
-// Import auth routes
-const authRoutes = require('./authRoutes')
-app.use(authRoutes)
+// Import Google Identity Services authentication
+const { router: googleAuthRouter } = require('./googleAuth')
+app.use(googleAuthRouter)
 
 const io = new Server(server, {
   cors: { origin: true, methods: ['GET', 'POST'], credentials: true },
