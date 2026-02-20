@@ -1,0 +1,343 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { io } from 'socket.io-client'
+
+const ICE_SERVERS = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+  ],
+}
+
+const useWebRTC = (roomId, userId, userName) => {
+  const [localStream, setLocalStream] = useState(null)
+  const [displayStream, setDisplayStream] = useState(null)
+  const [peers, setPeers] = useState({})
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true)
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true)
+  const [isScreenSharing, setIsScreenSharing] = useState(false)
+  const [handRaisedUsers, setHandRaisedUsers] = useState({})
+  const [emojis, setEmojis] = useState([])
+  const [chatMessages, setChatMessages] = useState([])
+  const [screenShareWarning, setScreenShareWarning] = useState(false)
+  const [socketConnected, setSocketConnected] = useState(false)
+  const [toastMessage, setToastMessage] = useState('')
+  const [toastType, setToastType] = useState('info')
+  const [showToast, setShowToast] = useState(false)
+
+  const socketRef = useRef(null)
+  const peerConnectionsRef = useRef({})
+  const localStreamRef = useRef(null)
+  const screenStreamRef = useRef(null)
+
+  
+  
+  
+  const createPC = useCallback((targetUserId) => {
+    if (peerConnectionsRef.current[targetUserId]) {
+      return peerConnectionsRef.current[targetUserId]
+    }
+
+    console.log('🔗 Creating PC →', targetUserId.slice(0, 6))
+    const pc = new RTCPeerConnection(ICE_SERVERS)
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, localStreamRef.current)
+      })
+    }
+
+    pc.ontrack = ({ streams: [remoteStream] }) => {
+      console.log('🎥 Remote track from', targetUserId.slice(0, 6))
+      setPeers((prev) => ({
+        ...prev,
+        [targetUserId]: { ...prev[targetUserId], stream: remoteStream },
+      }))
+    }
+
+    pc.onicecandidate = ({ candidate }) => {
+      if (candidate && socketRef.current?.connected) {
+        socketRef.current.emit('signal-send', {
+          targetUserId,
+          userId,
+          signal: { type: 'ice-candidate', candidate },
+        })
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      console.log('🔌 PC state', targetUserId.slice(0, 6) + ':', pc.connectionState)
+      if (pc.connectionState === 'failed') pc.restartIce()
+    }
+
+    peerConnectionsRef.current[targetUserId] = pc
+    return pc
+  }, [userId])
+
+  
+  
+  
+  useEffect(() => {
+    let cancelled = false
+    navigator.mediaDevices
+      .getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+      .then((stream) => {
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
+        localStreamRef.current = stream
+        setLocalStream(stream)
+        setDisplayStream(stream)
+        console.log('🎥 Media ready')
+      })
+      .catch((err) => console.warn('⚠️ Media unavailable:', err.message))
+
+    return () => {
+      cancelled = true
+      localStreamRef.current?.getTracks().forEach((t) => t.stop())
+      screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+    }
+  }, [])
+
+  
+  
+  
+  useEffect(() => {
+    
+    
+    const serverUrl = import.meta.env.VITE_SERVER_URL ||
+      `http://${window.location.hostname}:5000`
+    console.log('🔌 Connecting to', serverUrl)
+    const socket = io(serverUrl, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: 20,
+    })
+    socketRef.current = socket
+
+    socket.on('connect', () => { console.log('✅ Socket:', socket.id); setSocketConnected(true) })
+    socket.on('disconnect', (r) => { console.warn('❌ Disconnected:', r); setSocketConnected(false) })
+    socket.on('connect_error', (e) => console.error('🔥', e.message))
+
+    socket.on('emoji-received', ({ userId: sid, emoji, userName: sName, timestamp }) => {
+      const id = `${timestamp}-${sid}-${Math.random().toString(36).slice(2, 8)}`
+      setEmojis((prev) => [...prev, { id, emoji, userId: sid, userName: sName }])
+      setTimeout(() => setEmojis((prev) => prev.filter((e) => e.id !== id)), 3500)
+    })
+
+    socket.on('chat-message-received', (msg) => {
+      setChatMessages((prev) => [...prev, msg])
+    })
+
+    socket.on('hand-raised', ({ userId: uid, isRaised }) => {
+      setHandRaisedUsers((prev) => ({ ...prev, [uid]: isRaised }))
+    })
+
+    return () => { socket.disconnect(); socketRef.current = null }
+  }, [])
+
+  
+  
+  
+  useEffect(() => {
+    if (!roomId || !userId) return
+    const socket = socketRef.current
+    if (!socket) return
+
+    const doJoin = () => {
+      console.log('🚀 Joining room', roomId)
+      socket.emit('join-room', { roomId, userId, userName })
+    }
+
+    if (socket.connected) doJoin()
+    else socket.once('connect', doJoin)
+
+    const onReconnect = () => { console.log('🔄 Rejoining room after reconnect'); doJoin() }
+    socket.io.on('reconnect', onReconnect)
+
+    
+    const onRoomParticipants = async (participants) => {
+      console.log('👥 Existing:', participants.length, 'peers')
+      for (const p of participants) {
+        const pc = createPC(p.userId)
+        setPeers((prev) => ({
+          ...prev,
+          [p.userId]: { connection: pc, stream: null, userData: p, ...prev[p.userId] },
+        }))
+        try {
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          socket.emit('signal-send', { targetUserId: p.userId, userId, signal: { type: 'offer', sdp: offer } })
+          console.log('📤 Offer →', p.userId.slice(0, 6))
+        } catch (e) { console.error('Offer error:', e) }
+      }
+    }
+
+    
+    const onUserJoined = (data) => {
+      console.log('👤 Joined:', data.userName)
+      setPeers((prev) => ({
+        ...prev,
+        [data.userId]: { connection: null, stream: null, userData: data, ...prev[data.userId] },
+      }))
+    }
+
+    
+    const onSignal = async ({ userId: senderId, signal }) => {
+      try {
+        if (signal.type === 'offer') {
+          const pc = createPC(senderId)
+          setPeers((prev) => ({
+            ...prev,
+            [senderId]: { connection: pc, stream: null, ...prev[senderId] },
+          }))
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp))
+          const answer = await pc.createAnswer()
+          await pc.setLocalDescription(answer)
+          socket.emit('signal-send', { targetUserId: senderId, userId, signal: { type: 'answer', sdp: answer } })
+          console.log('📤 Answer →', senderId.slice(0, 6))
+        } else if (signal.type === 'answer') {
+          const pc = peerConnectionsRef.current[senderId]
+          if (pc) await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp))
+        } else if (signal.type === 'ice-candidate') {
+          const pc = peerConnectionsRef.current[senderId]
+          if (pc) try { await pc.addIceCandidate(new RTCIceCandidate(signal.candidate)) } catch {}
+        }
+      } catch (e) { console.error('Signal error:', e) }
+    }
+
+    
+    const onUserLeft = ({ userId: leftId }) => {
+      console.log('👋 Left:', leftId)
+      peerConnectionsRef.current[leftId]?.close()
+      delete peerConnectionsRef.current[leftId]
+      setPeers((prev) => { const n = { ...prev }; delete n[leftId]; return n })
+      setHandRaisedUsers((prev) => { const n = { ...prev }; delete n[leftId]; return n })
+    }
+
+    socket.off('room-participants').on('room-participants', onRoomParticipants)
+    socket.off('user-joined').on('user-joined', onUserJoined)
+    socket.off('signal-receive').on('signal-receive', onSignal)
+    socket.off('user-left').on('user-left', onUserLeft)
+
+    return () => {
+      socket.io.off('reconnect', onReconnect)
+      socket.off('room-participants', onRoomParticipants)
+      socket.off('user-joined', onUserJoined)
+      socket.off('signal-receive', onSignal)
+      socket.off('user-left', onUserLeft)
+    }
+  }, [roomId, userId, userName, createPC])
+
+  
+  
+  
+  const toggleAudio = useCallback(() => {
+    const track = localStreamRef.current?.getAudioTracks()[0]
+    if (track) { track.enabled = !track.enabled; setIsAudioEnabled(track.enabled) }
+  }, [])
+
+  const toggleVideo = useCallback(() => {
+    const track = localStreamRef.current?.getVideoTracks()[0]
+    if (track) { track.enabled = !track.enabled; setIsVideoEnabled(track.enabled) }
+  }, [])
+
+  const stopScreenShare = useCallback(() => {
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+    screenStreamRef.current = null
+    const videoTrack = localStreamRef.current?.getVideoTracks()[0]
+    if (videoTrack) {
+      Object.values(peerConnectionsRef.current).forEach((pc) => {
+        pc.getSenders().find((s) => s.track?.kind === 'video')?.replaceTrack(videoTrack)
+      })
+      setDisplayStream(localStreamRef.current)
+    }
+    setIsScreenSharing(false)
+    setScreenShareWarning(false)
+  }, [])
+
+  const startScreenShare = useCallback(async () => {
+    try {
+      setScreenShareWarning(true)
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: 'always' }, audio: false,
+      })
+      screenStreamRef.current = screenStream
+      const screenTrack = screenStream.getVideoTracks()[0]
+      await Promise.all(
+        Object.values(peerConnectionsRef.current).map((pc) => {
+          const s = pc.getSenders().find((s) => s.track?.kind === 'video')
+          return s ? s.replaceTrack(screenTrack) : Promise.resolve()
+        })
+      )
+      setDisplayStream(screenStream)
+      setIsScreenSharing(true)
+      screenTrack.onended = () => stopScreenShare()
+      setToastMessage('✅ Screen sharing started'); setToastType('success'); setShowToast(true)
+      setTimeout(() => setScreenShareWarning(false), 3000)
+    } catch (err) {
+      setScreenShareWarning(false)
+      if (err.name !== 'NotAllowedError') {
+        setToastMessage('Failed to start screen sharing'); setToastType('error'); setShowToast(true)
+      }
+    }
+  }, [stopScreenShare])
+
+  const toggleHandRaise = useCallback(() => {
+    const isRaised = !handRaisedUsers[userId]
+    setHandRaisedUsers((prev) => ({ ...prev, [userId]: isRaised }))
+    socketRef.current?.emit('toggle-hand', { userId, isRaised })
+  }, [userId, handRaisedUsers])
+
+  const sendEmoji = useCallback((emoji) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('emoji-reaction', { userId, emoji, userName })
+    }
+  }, [userId, userName])
+
+  const sendChatMessage = useCallback((message) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('chat-message', { userId, userName, message })
+    }
+  }, [userId, userName])
+
+  const leaveRoom = useCallback(() => {
+    Object.values(peerConnectionsRef.current).forEach((pc) => pc.close())
+    peerConnectionsRef.current = {}
+    localStreamRef.current?.getTracks().forEach((t) => t.stop())
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+    socketRef.current?.emit('leave-room', { userId })
+  }, [userId])
+
+  return {
+    localStream,
+    displayStream,
+    peers,
+    isAudioEnabled,
+    isVideoEnabled,
+    isScreenSharing,
+    handRaisedUsers,
+    emojis,
+    chatMessages,
+    screenShareWarning,
+    setScreenShareWarning,
+    socketConnected,
+    toastMessage,
+    toastType,
+    showToast,
+    setShowToast,
+    toggleAudio,
+    toggleVideo,
+    startScreenShare,
+    stopScreenShare,
+    toggleHandRaise,
+    sendEmoji,
+    sendChatMessage,
+    leaveRoom,
+  }
+}
+
+export default useWebRTC

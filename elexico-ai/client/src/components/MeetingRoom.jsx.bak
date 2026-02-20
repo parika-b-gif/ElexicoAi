@@ -1,0 +1,525 @@
+import { useState, useEffect, useRef } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { v4 as uuidv4 } from 'uuid'
+import {
+  Mic,
+  MicOff,
+  Video,
+  VideoOff,
+  Monitor,
+  MonitorOff,
+  Hand,
+  Smile,
+  MessageSquare,
+  Users,
+  PhoneOff,
+  Settings,
+  Circle,
+  Link,
+  Check,
+} from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+
+import useWebRTC from '../hooks/useWebRTC'
+import useRecorder from '../hooks/useRecorder'
+import VideoTile from './VideoTile'
+import ChatPanel from './ChatPanel'
+import ParticipantsPanel from './ParticipantsPanel'
+import EmojiPicker from './EmojiPicker'
+import FloatingEmoji from './FloatingEmoji'
+import ScreenShareWarning from './ScreenShareWarning'
+import Toast from './Toast'
+
+const MeetingRoom = () => {
+  const { roomId } = useParams()
+  const navigate = useNavigate()
+  const [userId] = useState(() => uuidv4())
+  const [userName] = useState(() => `User-${userId.slice(0, 6)}`)
+  const [showChat, setShowChat] = useState(false)
+  const [showParticipants, setShowParticipants] = useState(false)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [showShareModal, setShowShareModal] = useState(false)
+
+  const {
+    localStream,
+    displayStream,
+    peers,
+    isAudioEnabled,
+    isVideoEnabled,
+    isScreenSharing,
+    handRaisedUsers,
+    emojis,
+    chatMessages,
+    screenShareWarning,
+    setScreenShareWarning,
+    socketConnected,
+    toastMessage,
+    toastType,
+    showToast,
+    setShowToast,
+    toggleAudio,
+    toggleVideo,
+    startScreenShare,
+    stopScreenShare,
+    toggleHandRaise,
+    sendEmoji,
+    sendChatMessage,
+    leaveRoom,
+  } = useWebRTC(roomId, userId, userName)
+
+  const {
+    isRecording,
+    recordedChunks,
+    startRecording,
+    stopRecording,
+    downloadRecording,
+    clearRecording,
+  } = useRecorder()
+
+  const localVideoRef = useRef(null)
+
+  
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream])
+
+  
+  const handleRecordingToggle = () => {
+    if (isRecording) {
+      stopRecording()
+    } else {
+      if (localStream) {
+        startRecording(localStream)
+      }
+    }
+  }
+
+  
+  useEffect(() => {
+    if (!isRecording && recordedChunks.length > 0) {
+      downloadRecording()
+      clearRecording()
+    }
+  }, [isRecording, recordedChunks, downloadRecording, clearRecording])
+
+  
+  const handleLeaveRoom = () => {
+    leaveRoom()
+    navigate('/')
+  }
+
+  
+  const handleEmojiSelect = (emoji) => {
+    sendEmoji(emoji)
+    setShowEmojiPicker(false)
+  }
+
+  
+  const copyToClipboard = (text) => {
+    
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text)
+    }
+    
+    return new Promise((resolve, reject) => {
+      const el = document.createElement('textarea')
+      el.value = text
+      el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0'
+      document.body.appendChild(el)
+      el.focus()
+      el.select()
+      try {
+        document.execCommand('copy')
+        document.body.removeChild(el)
+        resolve()
+      } catch (e) {
+        document.body.removeChild(el)
+        reject(e)
+      }
+    })
+  }
+
+  
+  const handleCopyLink = () => {
+    const meetingLink = window.location.href
+    copyToClipboard(meetingLink)
+      .then(() => {
+        setLinkCopied(true)
+        setTimeout(() => setLinkCopied(false), 2000)
+      })
+      .catch(() => {
+        
+        setShowShareModal(true)
+      })
+  }
+
+  
+  const participantCount = Object.keys(peers).length + 1 
+  const getGridCols = () => {
+    if (participantCount === 1) return 'grid-cols-1'
+    if (participantCount === 2) return 'grid-cols-2'
+    if (participantCount <= 4) return 'grid-cols-2'
+    if (participantCount <= 9) return 'grid-cols-3'
+    return 'grid-cols-4'
+  }
+
+  const meetingLink = window.location.href
+
+  return (
+    <div className="h-screen flex flex-col relative overflow-hidden bg-gray-900">
+      {}
+      <AnimatePresence>
+        {showShareModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-[100000] flex items-center justify-center p-4"
+            onClick={() => setShowShareModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-gray-900 font-semibold text-lg mb-1">Share meeting link</h2>
+              <p className="text-gray-500 text-sm mb-4">Anyone with this link can join your meeting</p>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={meetingLink}
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onFocus={(e) => e.target.select()}
+                />
+                <button
+                  onClick={() => {
+                    copyToClipboard(meetingLink).then(() => {
+                      setLinkCopied(true)
+                      setShowShareModal(false)
+                      setTimeout(() => setLinkCopied(false), 2000)
+                    })
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+                >
+                  <Check size={14} />
+                  Copy
+                </button>
+              </div>
+              <p className="text-gray-400 text-xs mt-3">💡 Tip: You can also manually select and copy the link above</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {}
+      <ScreenShareWarning 
+        isVisible={screenShareWarning} 
+        onClose={() => setScreenShareWarning(false)} 
+      />
+
+      {}
+      <Toast 
+        message={toastMessage}
+        type={toastType}
+        isVisible={showToast}
+        onClose={() => setShowToast(false)}
+        duration={5000}
+      />
+
+      {}
+      <motion.div
+        initial={{ y: -100 }}
+        animate={{ y: 0 }}
+        className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between relative z-10 shadow-sm"
+      >
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2">
+            <div className="bg-blue-600 rounded-lg p-1.5">
+              <Video className="text-white" size={20} />
+            </div>
+            <h1 className="text-gray-800 font-medium text-lg">Elexico AI</h1>
+          </div>
+          <div className="bg-gray-100 px-3 py-1 rounded-md">
+            <p className="text-gray-600 text-sm">{roomId}</p>
+          </div>
+          {}
+          <button
+            onClick={handleCopyLink}
+            className="flex items-center space-x-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+            title="Share meeting link"
+          >
+            {linkCopied ? (
+              <>
+                <Check size={14} />
+                <span>Copied!</span>
+              </>
+            ) : (
+              <>
+                <Link size={14} />
+                <span>Share</span>
+              </>
+            )}
+          </button>
+          {}
+          <div className={`flex items-center space-x-1 px-2 py-1 rounded-md text-xs ${
+            socketConnected ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <span>{socketConnected ? 'Connected' : 'Disconnected'}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-3">
+          {isRecording && (
+            <motion.div
+              animate={{ opacity: [1, 0.5, 1] }}
+              transition={{ repeat: Infinity, duration: 1.5 }}
+              className="flex items-center space-x-2 bg-red-50 px-3 py-1 rounded-md"
+            >
+              <Circle className="text-red-500 fill-red-500" size={10} />
+              <span className="text-red-600 text-sm font-medium">Recording</span>
+            </motion.div>
+          )}
+          
+          <div className="bg-gray-100 px-3 py-1.5 rounded-md">
+            <p className="text-gray-700 text-sm">{participantCount} {participantCount === 1 ? 'participant' : 'participants'}</p>
+          </div>
+        </div>
+      </motion.div>
+
+      {}
+      <div className="flex-1 flex overflow-hidden relative">
+        {}
+        <div className="flex-1 p-4 overflow-hidden min-h-0">
+          <div className={`grid ${getGridCols()} gap-4 h-full`}>
+            {}
+            <VideoTile
+              stream={displayStream || localStream}
+              userName={userName}
+              isLocal={true}
+              isMuted={!isAudioEnabled}
+              isVideoOff={!isVideoEnabled}
+              isHandRaised={handRaisedUsers[userId]}
+              isScreenSharing={isScreenSharing}
+            />
+
+            {}
+            {Object.entries(peers).map(([peerId, peerData]) => (
+              <VideoTile
+                key={peerId}
+                stream={peerData.stream}
+                userName={peerData.userData?.userName || `User-${peerId.slice(0, 6)}`}
+                isLocal={false}
+                isMuted={false}
+                isVideoOff={!peerData.stream}
+                isHandRaised={handRaisedUsers[peerId]}
+              />
+            ))}
+          </div>
+        </div>
+
+        {}
+        <AnimatePresence>
+          {showChat && (
+            <motion.div
+              initial={{ x: 400 }}
+              animate={{ x: 0 }}
+              exit={{ x: 400 }}
+              transition={{ type: 'spring', damping: 25 }}
+              className="w-80 bg-white border-l border-gray-200 shadow-lg"
+            >
+              <ChatPanel
+                messages={chatMessages}
+                onSendMessage={sendChatMessage}
+                onClose={() => setShowChat(false)}
+                currentUserId={userId}
+              />
+            </motion.div>
+          )}
+
+          {showParticipants && (
+            <motion.div
+              initial={{ x: 400 }}
+              animate={{ x: 0 }}
+              exit={{ x: 400 }}
+              transition={{ type: 'spring', damping: 25 }}
+              className="w-80 bg-white border-l border-gray-200 shadow-lg"
+            >
+              <ParticipantsPanel
+                participants={[
+                  { userId, userName, isLocal: true },
+                  ...Object.entries(peers).map(([id, data]) => ({
+                    userId: id,
+                    userName: data.userData?.userName || `User-${id.slice(0, 6)}`,
+                    isLocal: false,
+                  })),
+                ]}
+                handRaisedUsers={handRaisedUsers}
+                onClose={() => setShowParticipants(false)}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {}
+      <motion.div
+        initial={{ y: 100 }}
+        animate={{ y: 0 }}
+        className="bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-center space-x-3 relative z-10 shadow-lg"
+      >
+        {}
+        <button
+          onClick={toggleAudio}
+          title={isAudioEnabled ? 'Turn off microphone' : 'Turn on microphone'}
+          className={`p-3 rounded-full transition-all hover:bg-gray-100 ${
+            !isAudioEnabled ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200'
+          }`}
+        >
+          {isAudioEnabled ? (
+            <Mic className="text-gray-700" size={22} />
+          ) : (
+            <MicOff className="text-white" size={22} />
+          )}
+        </button>
+
+        {}
+        <button
+          onClick={toggleVideo}
+          title={isVideoEnabled ? 'Turn off camera' : 'Turn on camera'}
+          className={`p-3 rounded-full transition-all hover:bg-gray-100 ${
+            !isVideoEnabled ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-200'
+          }`}
+        >
+          {isVideoEnabled ? (
+            <Video className="text-gray-700" size={22} />
+          ) : (
+            <VideoOff className="text-white" size={22} />
+          )}
+        </button>
+
+        {}
+        <button
+          onClick={isScreenSharing ? stopScreenShare : startScreenShare}
+          title={isScreenSharing ? 'Stop presenting' : 'Present now'}
+          className={`p-3 rounded-full transition-all ${
+            isScreenSharing
+              ? 'bg-blue-500 hover:bg-blue-600'
+              : 'bg-gray-200 hover:bg-gray-300'
+          }`}
+        >
+          {isScreenSharing ? (
+            <MonitorOff className="text-white" size={22} />
+          ) : (
+            <Monitor className="text-gray-700" size={22} />
+          )}
+        </button>
+
+        <div className="w-px h-8 bg-gray-300 mx-2"></div>
+
+        {}
+        <button
+          onClick={toggleHandRaise}
+          title={handRaisedUsers[userId] ? 'Lower hand' : 'Raise hand'}
+          className={`p-3 rounded-full transition-all ${
+            handRaisedUsers[userId]
+              ? 'bg-yellow-400 hover:bg-yellow-500'
+              : 'bg-gray-200 hover:bg-gray-300'
+          }`}
+        >
+          <Hand className={handRaisedUsers[userId] ? 'text-gray-800' : 'text-gray-700'} size={22} />
+        </button>
+
+        {}
+        <div className="relative">
+          <button
+            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+            title="Send a reaction"
+            className="p-3 rounded-full bg-gray-200 hover:bg-gray-300 transition-all"
+          >
+            <Smile className="text-gray-700" size={22} />
+          </button>
+
+          <AnimatePresence>
+            {showEmojiPicker && (
+              <EmojiPicker
+                onSelect={handleEmojiSelect}
+                onClose={() => setShowEmojiPicker(false)}
+              />
+            )}
+          </AnimatePresence>
+        </div>
+
+        {}
+        <button
+          onClick={() => setShowChat(!showChat)}
+          title="Toggle chat"
+          className={`p-3 rounded-full transition-all ${
+            showChat ? 'bg-blue-500' : 'bg-gray-200 hover:bg-gray-300'
+          }`}
+        >
+          <MessageSquare className={showChat ? 'text-white' : 'text-gray-700'} size={22} />
+        </button>
+
+        {}
+        <button
+          onClick={() => setShowParticipants(!showParticipants)}
+          title="Show participants"
+          className={`p-3 rounded-full transition-all ${
+            showParticipants ? 'bg-blue-500' : 'bg-gray-200 hover:bg-gray-300'
+          }`}
+        >
+          <Users className={showParticipants ? 'text-white' : 'text-gray-700'} size={22} />
+        </button>
+
+        {}
+        <button
+          onClick={handleRecordingToggle}
+          title={isRecording ? 'Stop recording' : 'Start recording'}
+          className={`p-3 rounded-full transition-all ${
+            isRecording
+              ? 'bg-red-500 hover:bg-red-600'
+              : 'bg-gray-200 hover:bg-gray-300'
+          }`}
+        >
+          <Circle
+            className={isRecording ? 'text-white  fill-white' : 'text-gray-700'}
+            size={22}
+          />
+        </button>
+
+        <div className="w-px h-8 bg-gray-300 mx-2"></div>
+
+        {}
+        <button
+          onClick={handleLeaveRoom}
+          title="Leave call"
+          className="p-3 bg-red-500 hover:bg-red-600 rounded-full transition-all"
+        >
+          <PhoneOff className="text-white" size={22} />
+        </button>
+      </motion.div>
+
+      {}
+      <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 99999 }}>
+        <AnimatePresence>
+          {emojis.map((emojiData) => (
+            <FloatingEmoji
+              key={emojiData.id}
+              emoji={emojiData.emoji}
+              id={emojiData.id}
+            />
+          ))}
+        </AnimatePresence>
+      </div>
+    </div>
+  )
+}
+
+export default MeetingRoom
