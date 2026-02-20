@@ -41,6 +41,10 @@ const server = http.createServer(app)
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json())
 
+// Import auth routes
+const authRoutes = require('./authRoutes')
+app.use(authRoutes)
+
 const io = new Server(server, {
   cors: { origin: true, methods: ['GET', 'POST'], credentials: true },
   pingInterval: 25000,
