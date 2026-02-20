@@ -1,0 +1,91 @@
+🔧 QUICK SETUP - GET YOUR GOOGLE CLIENT ID
+================================================
+
+⚠️  IMPORTANT: You need to configure Google Sign-In before it will work!
+
+📋 STEP-BY-STEP INSTRUCTIONS (5 minutes):
+
+1. Go to Google Cloud Console
+   🔗 https://console.cloud.google.com
+
+2. Create a New Project
+   • Click "Select a project" → "New Project"
+   • Name: "Elexico AI"
+   • Click "Create"
+
+3. Configure OAuth Consent Screen
+   • Go to: APIs & Services → OAuth consent screen
+   • Select "External" user type
+   • Click "Create"
+   • Fill in:
+     - App name: Elexico AI
+     - User support email: your-email@gmail.com
+     - Developer contact: your-email@gmail.com
+   • Click "Save and Continue"
+   • Add scopes:
+     * openid
+     * .../auth/userinfo.email
+     * .../auth/userinfo.profile
+   • Click "Save and Continue"
+   • Add test users (your email)
+   • Click "Save and Continue"
+
+4. Create OAuth 2.0 Client ID
+   • Go to: APIs & Services → Credentials
+   • Click "Create Credentials" → "OAuth client ID"
+   • Application type: Web application
+   • Name: Elexico AI Web Client
+   • Authorized JavaScript origins:
+     * http://localhost:3001
+     * http://localhost:5000
+   • Click "Create"
+
+5. Copy Your Client ID
+   • You'll see: "123456789-abc.apps.googleusercontent.com"
+   • Copy this entire string!
+
+6. Update Configuration Files
+
+   A. Edit: elexico-ai/server/.env
+      Replace:
+      GOOGLE_CLIENT_ID=YOUR_CLIENT_ID_HERE.apps.googleusercontent.com
+      
+      With:
+      GOOGLE_CLIENT_ID=123456789-abc.apps.googleusercontent.com
+                       ↑ paste your real Client ID here
+
+   B. Edit: elexico-ai/client/.env
+      Replace:
+      VITE_GOOGLE_CLIENT_ID=YOUR_CLIENT_ID_HERE.apps.googleusercontent.com
+      
+      With:
+      VITE_GOOGLE_CLIENT_ID=123456789-abc.apps.googleusercontent.com
+                            ↑ paste your real Client ID here
+
+7. Restart the Servers
+   
+   Stop both servers (Ctrl+C) and restart:
+   
+   Terminal 1 (Server):
+   $ cd elexico-ai/server
+   $ npm start
+   
+   Terminal 2 (Client):
+   $ cd elexico-ai/client
+   $ npm run dev
+
+8. Test It!
+   • Open: http://localhost:3001
+   • You should now see the "Sign in with Google" button
+   • Click it and sign in with your Google account
+   • ✅ Done!
+
+================================================
+
+📖 For detailed instructions, see:
+   elexico-ai/GOOGLE_SIGN_IN_SETUP.md
+
+🆘 Having issues? Check the Troubleshooting section in:
+   elexico-ai/GOOGLE_SIGN_IN_SETUP.md
+
+================================================

@@ -22,21 +22,28 @@ const GoogleSignIn = () => {
       setLoading(false)
     }
 
-    // Load Google Identity Services script
-    if (!window.google) {
-      const script = document.createElement('script')
-      script.src = 'https://accounts.google.com/gsi/client'
-      script.async = true
-      script.defer = true
-      script.onload = initializeGoogleSignIn
-      document.body.appendChild(script)
-    } else {
-      initializeGoogleSignIn()
+    // Check if using placeholder/invalid Client ID
+    const isPlaceholder = !GOOGLE_CLIENT_ID || 
+                          GOOGLE_CLIENT_ID.includes('YOUR_CLIENT_ID') || 
+                          GOOGLE_CLIENT_ID === 'your-client-id-here.apps.googleusercontent.com'
+
+    // Only load Google script if we have a valid Client ID
+    if (!isPlaceholder) {
+      if (!window.google) {
+        const script = document.createElement('script')
+        script.src = 'https://accounts.google.com/gsi/client'
+        script.async = true
+        script.defer = true
+        script.onload = initializeGoogleSignIn
+        document.body.appendChild(script)
+      } else {
+        initializeGoogleSignIn()
+      }
     }
 
     return () => {
       // Cleanup
-      if (window.google) {
+      if (window.google && !isPlaceholder) {
         window.google.accounts.id.cancel()
       }
     }
@@ -44,9 +51,15 @@ const GoogleSignIn = () => {
 
   const initializeGoogleSignIn = () => {
     if (!window.google || !GOOGLE_CLIENT_ID) {
-      console.error('Google Sign-In not available or Client ID missing')
-      setError('Google Sign-In configuration error')
-      return
+      return // Don't initialize if requirements not met
+    }
+
+    // Check if using placeholder Client ID
+    const isPlaceholder = GOOGLE_CLIENT_ID.includes('YOUR_CLIENT_ID') || 
+                          GOOGLE_CLIENT_ID === 'your-client-id-here.apps.googleusercontent.com'
+    
+    if (isPlaceholder) {
+      return // Don't initialize with placeholder ID
     }
 
     try {
@@ -57,17 +70,17 @@ const GoogleSignIn = () => {
         cancel_on_tap_outside: true,
       })
 
-      // Render the Sign-In button
-      window.google.accounts.id.renderButton(
-        document.getElementById('googleSignInButton'),
-        {
+      // Render the Sign-In button only if the container exists
+      const buttonContainer = document.getElementById('googleSignInButton')
+      if (buttonContainer) {
+        window.google.accounts.id.renderButton(buttonContainer, {
           theme: 'outline',
           size: 'large',
           text: 'signin_with',
           shape: 'rectangular',
           logo_alignment: 'left',
-        }
-      )
+        })
+      }
     } catch (err) {
       console.error('Error initializing Google Sign-In:', err)
       setError('Failed to initialize Google Sign-In')
@@ -222,13 +235,42 @@ const GoogleSignIn = () => {
   }
 
   // Sign in button state
+  // Check if using placeholder/invalid Client ID
+  const isPlaceholder = !GOOGLE_CLIENT_ID || 
+                        GOOGLE_CLIENT_ID.includes('YOUR_CLIENT_ID') || 
+                        GOOGLE_CLIENT_ID === 'your-client-id-here.apps.googleusercontent.com'
+
+  if (isPlaceholder) {
+    return (
+      <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-4 max-w-sm">
+        <div className="flex items-start gap-3">
+          <div className="text-2xl">⚠️</div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-yellow-900 mb-1">
+              Google Sign-In Not Configured
+            </h3>
+            <p className="text-sm text-yellow-800 mb-2">
+              You need to set up your Google Client ID to enable authentication.
+            </p>
+            <a
+              href="https://console.cloud.google.com/apis/credentials"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded transition-colors"
+            >
+              Get Client ID →
+            </a>
+            <p className="text-xs text-yellow-700 mt-2">
+              See <code className="bg-yellow-100 px-1 rounded">SETUP_INSTRUCTIONS.txt</code> for step-by-step guide
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="relative">
-      {!GOOGLE_CLIENT_ID && (
-        <div className="mb-2 px-3 py-2 bg-yellow-50 text-yellow-800 text-xs rounded">
-          ⚠️ Google Client ID not configured
-        </div>
-      )}
       <div id="googleSignInButton"></div>
     </div>
   )

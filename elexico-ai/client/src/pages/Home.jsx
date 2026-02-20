@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Video, Users, Shield, Sparkles, Calendar } from 'lucide-react'
 import { motion } from 'framer-motion'
-import GoogleSignIn from '../components/GoogleSignIn'
 
 function Home() {
   const [roomId, setRoomId] = useState('')
@@ -28,11 +27,6 @@ function Home() {
         transition={{ duration: 0.6 }}
         className="w-full max-w-5xl"
       >
-        {/* Google Sign-In - Top Right */}
-        <div className="flex justify-end mb-6">
-          <GoogleSignIn />
-        </div>
-
         <div className="text-center mb-12">
           <motion.div
             initial={{ scale: 0.9 }}
