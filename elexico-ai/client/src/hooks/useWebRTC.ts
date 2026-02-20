@@ -403,6 +403,33 @@ const useWebRTC = (
       setHandRaisedUsers(prev => ({ ...prev, [uid]: isRaised }))
     })
 
+    // Host control events
+    socket.on('force-mute', () => {
+      const track = localStreamRef.current?.getAudioTracks()[0]
+      if (track) {
+        track.enabled = false
+        setIsAudioEnabled(false)
+        setToastMessage('Host muted all participants')
+        setToastType('info')
+        setShowToast(true)
+      }
+    })
+
+    socket.on('removed-by-host', ({ reason }: { reason: string }) => {
+      setToastMessage(reason || 'You were removed from the meeting')
+      setToastType('warning')
+      setShowToast(true)
+      setTimeout(() => {
+        window.location.href = '/'
+      }, 2000)
+    })
+
+    socket.on('meeting-locked', ({ locked }: { locked: boolean }) => {
+      setToastMessage(locked ? 'Meeting locked by host' : 'Meeting unlocked by host')
+      setToastType('info')
+      setShowToast(true)
+    })
+
     return () => {
       socket.disconnect()
       socketRef.current = null

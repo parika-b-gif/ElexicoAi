@@ -5,12 +5,14 @@ import {
   Mic, MicOff, Video, VideoOff,
   Monitor, MonitorOff, Hand, Smile,
   MessageSquare, Users, PhoneOff,
-  Circle, Link, Check,
+  Circle, Link, Check, Settings,
+  Subtitles, Shield, Info,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 import useWebRTC                from '../hooks/useWebRTC'
 import useRecorder              from '../hooks/useRecorder'
+import { getSocket }            from '../services/socket'
 import VideoTile                from './VideoTile'
 import ChatPanel                from './ChatPanel'
 import ParticipantsPanel        from './ParticipantsPanel'
@@ -18,8 +20,18 @@ import EmojiPicker              from './EmojiPicker'
 import FloatingEmoji            from './FloatingEmoji'
 import ScreenShareWarning       from './ScreenShareWarning'
 import Toast                    from './Toast'
+import VideoSettings            from './VideoSettings'
+import LiveCaptions             from './LiveCaptions'
+import HostControls             from './HostControls'
+import MeetingInfo              from './MeetingInfo'
+import LayoutSelector           from './LayoutSelector'
 
-function gridClass(count: number): string {
+function gridClass(count: number, layout: 'grid' | 'speaker'): string {
+  if (layout === 'speaker') {
+    // Speaker view: flexible layout with one main large video
+    return 'grid-cols-1'
+  }
+  // Grid view: equal-sized tiles
   if (count === 1) return 'grid-cols-1'
   if (count === 2) return 'grid-cols-2'
   if (count <= 4)  return 'grid-cols-2'
@@ -52,6 +64,15 @@ const MeetingRoom: React.FC = () => {
   const [showEmojiPicker, setShowEmojiPicker]  = useState(false)
   const [linkCopied,      setLinkCopied]       = useState(false)
   const [showShareModal,  setShowShareModal]   = useState(false)
+  
+  // Advanced features state
+  const [showVideoSettings, setShowVideoSettings] = useState(false)
+  const [captionsEnabled, setCaptionsEnabled] = useState(false)
+  const [showHostControls, setShowHostControls] = useState(false)
+  const [showMeetingInfo, setShowMeetingInfo] = useState(false)
+  const [layout, setLayout] = useState<'grid' | 'speaker'>('grid')
+  const [isHost] = useState(true) // In production, determine from first user or backend
+  const [meetingLocked, setMeetingLocked] = useState(false)
 
   const {
     localStream, displayStream, peers,
@@ -92,6 +113,30 @@ const MeetingRoom: React.FC = () => {
     copyToClipboard(link)
       .then(() => { setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000) })
       .catch(() => setShowShareModal(true))
+  }
+
+  // Advanced features handlers
+  const handleMuteAll = () => {
+    const socket = getSocket()
+    if (socket && isHost) {
+      socket.emit('host:mute-all', { roomId })
+    }
+  }
+
+  const handleRemoveParticipant = (peerId: string) => {
+    const socket = getSocket()
+    if (socket && isHost) {
+      socket.emit('host:remove-participant', { roomId, peerId })
+    }
+  }
+
+  const handleToggleLock = () => {
+    const socket = getSocket()
+    if (socket && isHost) {
+      const newLockState = !meetingLocked
+      setMeetingLocked(newLockState)
+      socket.emit(newLockState ? 'host:lock-meeting' : 'host:unlock-meeting', { roomId })
+    }
   }
 
   const meetingLink       = window.location.href
@@ -170,6 +215,10 @@ const MeetingRoom: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
+          <LayoutSelector
+            layout={layout}
+            onLayoutChange={setLayout}
+          />
           {isRecording && (
             <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1.5 }}
               className="flex items-center gap-2 bg-red-50 px-3 py-1 rounded-md">
@@ -186,7 +235,7 @@ const MeetingRoom: React.FC = () => {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         <div className="flex-1 p-4 overflow-hidden min-h-0">
-          <div className={`grid ${gridClass(participantCount)} gap-4 h-full`}>
+          <div className={`grid ${gridClass(participantCount, layout)} gap-4 h-full`}>
 
             <VideoTile
               stream={displayStream || localStream}
@@ -243,7 +292,58 @@ const MeetingRoom: React.FC = () => {
               />
             </motion.div>
           )}
+
+          {showVideoSettings && (
+            <motion.div initial={{ x: 400 }} animate={{ x: 0 }} exit={{ x: 400 }}
+              transition={{ type: 'spring', damping: 25 }}
+              className="w-80 bg-white border-l border-gray-200 shadow-lg"
+            >
+              <VideoSettings
+                localStream={localStream}
+                onClose={() => setShowVideoSettings(false)}
+              />
+            </motion.div>
+          )}
+
+          {showHostControls && isHost && (
+            <motion.div initial={{ x: 400 }} animate={{ x: 0 }} exit={{ x: 400 }}
+              transition={{ type: 'spring', damping: 25 }}
+              className="w-80 bg-white border-l border-gray-200 shadow-lg"
+            >
+              <HostControls
+                participants={[
+                  { userId, userName, isLocal: true },
+                  ...peers.map(p => ({
+                    userId:   p.userId   || p.peerID,
+                    userName: p.userName || `User-${p.peerID.slice(0,6)}`,
+                    isLocal:  false,
+                  })),
+                ]}
+                userId={userId}
+                isHost={isHost}
+                isLocked={meetingLocked}
+                onMuteAll={handleMuteAll}
+                onRemoveParticipant={handleRemoveParticipant}
+                onToggleLock={handleToggleLock}
+                onClose={() => setShowHostControls(false)}
+              />
+            </motion.div>
+          )}
         </AnimatePresence>
+
+        {captionsEnabled && (
+          <LiveCaptions 
+            isEnabled={captionsEnabled}
+            onClose={() => setCaptionsEnabled(false)}
+          />
+        )}
+
+        {showMeetingInfo && (
+          <MeetingInfo
+            roomId={roomId}
+            onClose={() => setShowMeetingInfo(false)}
+          />
+        )}
       </div>
 
       <motion.footer
@@ -326,6 +426,44 @@ const MeetingRoom: React.FC = () => {
           activeClass="bg-red-500 hover:bg-red-600"
         >
           <Circle className={isRecording ? 'text-white fill-white' : 'text-gray-700'} size={22} />
+        </ControlButton>
+
+        <ControlButton
+          onClick={() => setShowVideoSettings(v => !v)}
+          active={showVideoSettings}
+          title="Video settings"
+          activeClass="bg-blue-500 hover:bg-blue-600"
+        >
+          <Settings className={showVideoSettings ? 'text-white' : 'text-gray-700'} size={22} />
+        </ControlButton>
+
+        <ControlButton
+          onClick={() => setCaptionsEnabled(v => !v)}
+          active={captionsEnabled}
+          title={captionsEnabled ? 'Turn off captions' : 'Turn on captions'}
+          activeClass="bg-blue-500 hover:bg-blue-600"
+        >
+          <Subtitles className={captionsEnabled ? 'text-white' : 'text-gray-700'} size={22} />
+        </ControlButton>
+
+        {isHost && (
+          <ControlButton
+            onClick={() => setShowHostControls(v => !v)}
+            active={showHostControls}
+            title="Host controls"
+            activeClass="bg-purple-500 hover:bg-purple-600"
+          >
+            <Shield className={showHostControls ? 'text-white' : 'text-gray-700'} size={22} />
+          </ControlButton>
+        )}
+
+        <ControlButton
+          onClick={() => setShowMeetingInfo(v => !v)}
+          active={showMeetingInfo}
+          title="Meeting info"
+          activeClass="bg-blue-500 hover:bg-blue-600"
+        >
+          <Info className={showMeetingInfo ? 'text-white' : 'text-gray-700'} size={22} />
         </ControlButton>
 
         <Divider />

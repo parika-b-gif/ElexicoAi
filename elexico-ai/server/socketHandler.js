@@ -170,6 +170,65 @@ function registerSocketHandlers(socket, io) {
     });
   });
 
+  // Host controls
+  socket.on('host:mute-all', ({ roomId }) => {
+    const targetRoom = roomId || socket.roomId;
+    if (!targetRoom) return;
+
+    log(socket.id, 'host:mute-all', `muting all in ${targetRoom}`);
+
+    // Broadcast to all participants except the host
+    socket.to(targetRoom).emit('force-mute', {
+      fromHost: socket.userId,
+      timestamp: Date.now(),
+    });
+  });
+
+  socket.on('host:remove-participant', ({ roomId, peerId }) => {
+    const targetRoom = roomId || socket.roomId;
+    if (!targetRoom || !peerId) return;
+
+    log(socket.id, 'host:remove-participant', `removing ${peerId.slice(0,6)} from ${targetRoom}`);
+
+    const participant = getParticipant(targetRoom, peerId);
+    if (participant?.socketId) {
+      const targetSocket = io.sockets.sockets.get(participant.socketId);
+      if (targetSocket) {
+        targetSocket.emit('removed-by-host', {
+          reason: 'Host removed you from the meeting',
+        });
+        targetSocket.disconnect(true);
+      }
+    }
+  });
+
+  socket.on('host:lock-meeting', ({ roomId }) => {
+    const targetRoom = roomId || socket.roomId;
+    if (!targetRoom) return;
+
+    log(socket.id, 'host:lock-meeting', `locking ${targetRoom}`);
+
+    // Store lock state in room metadata (you may want to use roomManager for this)
+    // For now, broadcast to all participants
+    io.to(targetRoom).emit('meeting-locked', {
+      locked: true,
+      byHost: socket.userId,
+    });
+  });
+
+  socket.on('host:unlock-meeting', ({ roomId }) => {
+    const targetRoom = roomId || socket.roomId;
+    if (!targetRoom) return;
+
+    log(socket.id, 'host:unlock-meeting', `unlocking ${targetRoom}`);
+
+    // Clear lock state
+    io.to(targetRoom).emit('meeting-locked', {
+      locked: false,
+      byHost: socket.userId,
+    });
+  });
+
   socket.on('leave-room', () => {
     log(socket.id, 'leave-room', `${socket.userName} leaving ${socket.roomId}`);
     handleLeaveRoom(socket, io);
